@@ -61,6 +61,7 @@ class KeyPoller():
                             self.capturedChars.append(curChar)
                 self.curEventLength = len(eventsPeek)
             if not len(self.capturedChars) == 0:
+                self.readHandle.FlushConsoleInputBuffer()
                 return self.capturedChars.pop(0)
             else:
                 return None
