@@ -11,9 +11,9 @@ if sys.version_info[0] < 3:
 
 
 class Swarm:
-    ## ToDo: fix bugs with param input and delete function
     def __init__(self, amount_of_individuals=50):
         self.__amount_of_individuals = 0
+
         ## changeable parameters
         self._fs = 1                       # field size [0,_fs]x[0,_fs]
         self._vel = 0.02*self._fs          # velocity 
@@ -36,8 +36,189 @@ class Swarm:
         plt.xlim(0,self._fs)
         plt.ylim(0,self._fs)
 
+    def __updatePosDir(self):
+        """
+        update position and direction array for all individuals
+        self.__individuals should be sorted before calling this function
+        """
+         ## array of x and y values are in the same order as self.__individuals
+        self.__position = np.empty([2,self.__amount_of_individuals])
+        self.__position[0,:] = np.array([ind.pos[0] for ind in self.__individuals])
+        self.__position[1,:] = np.array([ind.pos[1] for ind in self.__individuals])
 
+        ## direction array is in in the same order as self.__individuals
+        self.__direction = np.empty([2,self.__amount_of_individuals])
+        self.__direction[0,:] = np.array([ind.dir[0] for ind in self.__individuals])
+        self.__direction[1,:] = np.array([ind.dir[1] for ind in self.__individuals])
+
+
+
+    def newIndividuals(self, amount_of_individuals=1):
+        """
+        function: create amount_of_individuals new individuals and add them to self.__individuals list
+        input:    amount_of_individuals, integer, default 1
+        output:   none
+        """
+        assert int(amount_of_individuals)>0, "must be positive integer"
+        x_lex = [self.Individual(self) for i in range(int(amount_of_individuals))]
+        self.__amount_of_individuals += int(amount_of_individuals)
+        self.__individuals = np.sort(np.append(self.__individuals, np.array(x_lex, dtype="object")))
+        self.__updatePosDir()
+        print(amount_of_individuals, " new individuals created")
+
+    
+    def delIndividuals(self, amount_of_individuals=1):
+        """
+        function: delete amount_of_individuals individuals from self.__individuals list
+        input:    amount_of_individuals, integer, default 1
+        output:   none
+        """
+        assert int(amount_of_individuals)>0, "must be positive integer"
+        amount_of_individuals = int(amount_of_individuals)
+        if amount_of_individuals >= self.__amount_of_individuals:
+            print("delete all birds except one instead of {}".format(amount_of_individuals))
+            amount_of_individuals = self.__amount_of_individuals-1
+        to_del = np.random.choice(self.__amount_of_individuals, size=amount_of_individuals, replace=False)
+        # ToDo: make sure destructor is called (?)
+        rem = np.delete(self.__individuals, to_del)
+        self.__individuals = np.sort(rem)
+        self.__amount_of_individuals -= amount_of_individuals
+        self.__updatePosDir()  
+        print(amount_of_individuals, " individuals deleted")
+
+    def update(self):
+        """
+        function: update position and direction of individuals
+        input:    none
+        output:   none
+        """
+        if self._radius_co == self._fs:
+            self.mean_pos = np.mean(self.__position, axis=1)
+        for i in range(0, self.__amount_of_individuals):
+            self.__individuals[i].calculateNewDirection(i)
+        for ind in self.__individuals:
+            ind.update()
+        self.__updatePosDir()
+        self.__individuals = np.sort(self.__individuals)
+    
+    def mapIndex(self, index):
+        """
+        input:    positive integer
+        output:   index in range(0,self.__amount_of_individuals) 
+        """
+        return int(index) % self.__amount_of_individuals
+
+    def distanceByIndex(self, ind1, ind2):
+        """
+        function: compute distance (manhattan metric) between two individuals
+        input:    index of individuals in sorted list self.__individuals
+        output:   flaot, distance
+        """
+        ind1 = self.mapIndex(ind1)
+        ind2 = self.mapIndex(ind2)
+
+        dist_x = abs(self.__individuals[ind1].pos[0]-self.__individuals[ind2].pos[0])
+        if (dist_x>self._fs/2):
+            dist_x = self._fs-dist_x
+        dist_y = abs(self.__individuals[ind1].pos[1]-self.__individuals[ind2].pos[1])
+        if (dist_y>self._fs/2):
+            dist_y = self._fs-dist_y
+        return dist_x+dist_y
+                
+    
+    def xDistByIndex(self, ind1, ind2):
+        """
+        function: test if index is in range of (0, self.__amount_of_individuals)
+        input:    list or set of indices of individuals in sorted array self.__individuals
+        output:   bool, True if in range, False if not
+        """
+        ind1 = self.mapIndex(ind1)
+        ind2 = self.mapIndex(ind2)
+        dist_x = abs(self.__individuals[ind1].pos[0]-self.__individuals[ind2].pos[0])
+        if (dist_x>self._fs/2):
+            dist_x = self._fs-dist_x
+        return dist_x
+
+    def angleByIndex(self, ind_self, ind_other):
+        """
+        function: test if bird "other" is in sight range of bird "self"
+        input:    indices of individuals in sorted array self.__individuals
+        output:   bool, True if in range, False if not
+        """
+        ret_val = False
+        ind_self = self.mapIndex(ind_self)
+        ind_other = self.mapIndex(ind_other)
+        a = self.getIndivByIndex(ind_self).dir
+        b = self.getIndivByIndex(ind_other).pos-self.getIndivByIndex(ind_self).pos
+        try: 
+            ret_val = np.dot(a,b)/(np.linalg.norm(a)*np.linalg.norm(b)) > self._cos_angle
+        except:
+            ## case if one of the vecor norms is zero
+            ret_val = True
+        return ret_val
+
+    def inRange(self, index):
+        """
+        function: test if index is in range of (0, self.__amount_of_individuals)
+        input:    list or set of indices of individuals in sorted array self.__individuals
+        output:   bool, True if in range, False if not
+        """
+        try: 
+            i = int(index)
+            return (i < self.__amount_of_individuals and i >= 0)
+        except:
+            return all(x in range(0,self.__amount_of_individuals) for x in index)
+
+    def meanDirByIndex(self, index_list):
+        """
+        function: calculate average direction of a individuals given by index_list
+        input:    list or set of indices of individuals in sorted array self.__individuals
+        output:   two dimensional array containing average direction where ret_val[0]..x, ret_val[1]..y
+        """
+        if type(index_list) == set:
+            index_list = list(index_list)
+
+        assert self.inRange(index_list), "index not in range"
+        ret_val = np.mean(np.array(self.__direction[:,index_list]), axis=1)
+        return ret_val
+    
+    def meanPosByIndex(self, index_list):
+        """
+        function: calculate center of mass of a individuals given by index_list
+        input:    list or set of indices of individuals in sorted array self.__individuals
+        output:   two dimensional array containing center of mass where ret_val[0]..x, ret_val[1]..y
+        """
+        if type(index_list) == set:
+            index_list = list(index_list)
+        assert self.inRange(index_list), "index not in range"
+        ret_val = np.mean(np.array(self.__position[:,index_list]), axis=1)
+        return ret_val
+    
+    def getIndivByIndex(self, index):
+        """
+        function: get func
+        input:    index of individual in sorted array self.__individuals
+        output:   none
+        """
+        assert self.inRange(index), "index not in range"
+        return self.__individuals[int(index)]
+
+    def plot(self):
+        """
+        function: plot swarm in scatter plot (each individual is a dot)
+        input:    none
+        output:   none
+        """
+        self.__sc.set_offsets(np.c_[self.__position[0,:],self.__position[1,:]])
+        self.__fig.canvas.draw_idle()
+        if self._pause >0: plt.pause(self._pause)
+    
     def changeParameters(self):
+        """
+        function: change changeable parameters via comand line inputs
+        input:    none
+        output:   none
+        """
         print("""If you have finished changing parameters press [q] + [ENTER]
         Current Parameters:
         [1] field size: {}
@@ -142,136 +323,55 @@ class Swarm:
             else:
                 print("invalid input")
 
-        
-
-    def __updatePosDir(self):
-         ## array of x and y values same order as individuals
-        self.__position = np.empty([2,self.__amount_of_individuals])
-        self.__position[0,:] = np.array([ind.pos[0] for ind in self.__individuals])
-        self.__position[1,:] = np.array([ind.pos[1] for ind in self.__individuals])
-
-        ## direction array in same order as individuals
-        self.__direction = np.empty([2,self.__amount_of_individuals])
-        self.__direction[0,:] = np.array([ind.dir[0] for ind in self.__individuals])
-        self.__direction[1,:] = np.array([ind.dir[1] for ind in self.__individuals])
-
-    def newIndividuals(self, amount_of_individuals=1):
-        assert int(amount_of_individuals)>0, "must be positive integer"
-        x_lex = [self.Individual(self) for i in range(int(amount_of_individuals))]
-        self.__amount_of_individuals += int(amount_of_individuals)
-        self.__individuals = np.sort(np.append(self.__individuals, np.array(x_lex, dtype="object")))
-        self.__updatePosDir()
-    
-    def delIndividuals(self, amount_of_individuals=1):
-        assert int(amount_of_individuals)>0, "must be positive integer"
-        amount_of_individuals = int(amount_of_individuals)
-        if amount_of_individuals >= self.__amount_of_individuals:
-            print("delete all birds except one instead of {}".format(amount_of_individuals))
-            amount_of_individuals = self.__amount_of_individuals-1
-        to_del = np.random.randint(self.__amount_of_individuals, size=amount_of_individuals)
-        ## ToDo: make sure destructor gets called (?)
-        rem = np.delete(self.__individuals, to_del)
-        self.__individuals = np.sort(rem)
-        self.__amount_of_individuals -= amount_of_individuals
-        self.__updatePosDir()
-
-        
-
-    def update(self):
-        if self._radius_co == self._fs:
-            self.mean_pos = np.mean(self.__position, axis=1)
-        for i in range(0, self.__amount_of_individuals):
-            self.__individuals[i].calculateNewDirection(i)
-        for ind in self.__individuals:
-            ind.update()
-        self.__updatePosDir()
-        self.__individuals = np.sort(self.__individuals)
-    
-    def mapIndex(self, index):
-        return index % self.__amount_of_individuals
-
-    def distanceByIndex(self, ind1, ind2):
-        ind1 = self.mapIndex(ind1)
-        ind2 = self.mapIndex(ind2)
-
-        dist_x = abs(self.__individuals[ind1].pos[0]-self.__individuals[ind2].pos[0])
-        if (dist_x>self._fs/2):
-            dist_x = self._fs-dist_x
-        dist_y = abs(self.__individuals[ind1].pos[1]-self.__individuals[ind2].pos[1])
-        if (dist_y>self._fs/2):
-            dist_y = self._fs-dist_y
-        return dist_x+dist_y
-                
-    
-    def xDistByIndex(self, ind1, ind2):
-        ind1 = self.mapIndex(ind1)
-        ind2 = self.mapIndex(ind2)
-        dist_x = abs(self.__individuals[ind1].pos[0]-self.__individuals[ind2].pos[0])
-        if (dist_x>self._fs/2):
-            dist_x = self._fs-dist_x
-        return dist_x
-
-    def angleByIndex(self, ind_self, ind_other):
-        ret_val = False
-        ind_self = self.mapIndex(ind_self)
-        ind_other = self.mapIndex(ind_other)
-        a = self.getIndivByIndex(ind_self).dir
-        b = self.getIndivByIndex(ind_other).pos-self.getIndivByIndex(ind_self).pos
-        try: 
-            ret_val = np.dot(a,b)/(np.linalg.norm(a)*np.linalg.norm(b)) > self._cos_angle
-        except:
-            ## case if one of the vecor norms is zero
-            ret_val = True
-        return ret_val
-
-    def inRange(self, index):
-        try: 
-            i = int(index)
-            return (i < len(self.__individuals) and i >= 0)
-        except:
-            return all(x in range(0,len(self.__individuals)) for x in index)
-
-    def meanDirByIndex(self, index_list):
-        if type(index_list) == set:
-            index_list = list(index_list)
-
-        assert self.inRange(index_list), "index not in range"
-        ret = np.mean(np.array(self.__direction[:,index_list]), axis=1)
-        return ret
-    
-    def meanPosByIndex(self, index_list):
-        if type(index_list) == set:
-            index_list = list(index_list)
-        assert self.inRange(index_list), "index not in range"
-        ret = np.mean(np.array(self.__position[:,index_list]), axis=1)
-        return ret
-    
-    def getIndivByIndex(self, index):
-        assert self.inRange(index), "index not in range"
-        return self.__individuals[int(index)]
-
-    def plot(self):
-        self.__sc.set_offsets(np.c_[self.__position[0,:],self.__position[1,:]])
-        self.__fig.canvas.draw_idle()
-        if self._pause >0: plt.pause(self._pause)
-
     class Individual:
+        """ 
+        nested class containing individuals (agents) and their properties
+        """
         def __init__(self, swarm):
             self.s = swarm
             ## define position pos[0]..x, pos[1]..y
             self.pos = np.array([float(np.random.random()*self.s._fs), float(np.random.random()*self.s._fs)])
-
             ## define current direction
             self.dir = np.array([float(np.random.uniform(-1,1,1)), float(np.random.uniform(-1,1,1))])
 
+        ## overload functions to compare objects
+        def __eq__(self, other):
+            return eq(self.pos[0], other.pos[0])
+        def __ne__(self, other):
+            return ne(self.pos[0], other.pos[0])
+        def __lt__(self, other):
+            return self.pos[0] < other.pos[0]
+        def __le__(self, other):
+            return self.pos[0] <= other.pos[0]
+        def __gt__(self, other):
+            return self.pos[0] > other.pos[0]
+        def __ge__(self, other):
+            return self.pos[0] >= other.pos[0]
+        
+        def update(self):
+            """
+            function: update direction and position of individual
+            input:    none
+            output:   none
+            """
+            self.dir = self.__new_dir
+            self.pos[0] = (self.pos+self.__new_dir*self.s._vel)[0] % self.s._fs
+            self.pos[1] = (self.pos+self.__new_dir*self.s._vel)[1] % self.s._fs
+
         def calculateNewDirection(self, index):
+            """
+            function: calculate new direction for this individual and store it in self.__new_dir
+            input:    index of this individual in sorted array swarm.__individual
+            return:   none
+            """
+
             sep_env = set() # small
             ali_env = set([index]) # medium
             co_env = set([index])  # large
             i = index
-            # print(sep_env)
+            
             ## find individuals in environment
-            ## inc = -1: go to the left in s.individuals list
+            ## inc = -1: go to the left in s.individuals list, inc = 1: go to the right
             for inc in [-1,1]:
                 i = index+inc
                 while self.s.mapIndex(i) != index and self.s.xDistByIndex(index, i) <= self.s._radius_sep:
@@ -298,7 +398,7 @@ class Swarm:
             ## calculate new direction, don't change order of ifs
             self.__new_dir = self.dir
 
-            ## calculate seperation
+            ## calculate seperation vector
             if len(sep_env) > 0:
                 new_dir = np.array([0,0], dtype=float)
 
@@ -311,50 +411,29 @@ class Swarm:
                     except:
                         print("would divide by zero in calculateNewDirection")
                         # ToDo: think about what to do if (abs(tmp[0])+abs(tmp[1])) == 0, though very unlikely
-
                 new_dir = new_dir/len(sep_env)
                 self.__new_dir += new_dir*self.s._weight_sep
-
-
-                
-                # #if abs(np.dot(tmp, old)/np.sqrt((old*old).sum())/np.sqrt((tmp*tmp).sum())) > 0.8:
-
-            
-        
+      
+            ## calculate cohision vector
             if self.s._radius_co == self.s._fs:
+                ## if cohision radius is field size don't calculate mean every time
                 self.__new_dir += (self.s.mean_pos-self.pos)*self.s._weight_co
             elif len(co_env) > 0:
+                ## if cohision radius smaller than field size and birds in cohision radius
+                ## calculate mean position
                 tmp = self.s.meanPosByIndex(co_env)
                 self.__new_dir += (tmp-self.pos)*self.s._weight_co
             if len(ali_env) > 0:
-                # print(ali_env)
+                ## if birds in alignment radius calculate mean direction
                 tmp = self.s.meanDirByIndex(ali_env)
                 self.__new_dir += tmp*self.s._weight_ali
+            ## norm new direction vector
             norm = np.linalg.norm(self.__new_dir)
             if norm!= 0:
                 self.__new_dir = self.__new_dir/norm
-            
 
 
-        def update(self):
-            self.dir = self.__new_dir
-            self.pos[0] = (self.pos+self.__new_dir*self.s._vel)[0] % self.s._fs
-            self.pos[1] = (self.pos+self.__new_dir*self.s._vel)[1] % self.s._fs
-
-        def __eq__(self, other):
-            return eq(self.pos[0], other.pos[0])
-        def __ne__(self, other):
-            return ne(self.pos[0], other.pos[0])
-        def __lt__(self, other):
-            return self.pos[0] < other.pos[0]
-        def __le__(self, other):
-            return self.pos[0] <= other.pos[0]
-        def __gt__(self, other):
-            return self.pos[0] > other.pos[0]
-        def __ge__(self, other):
-            return self.pos[0] >= other.pos[0]
-
-amount = input("How many individuls should the swarm contain? input [amount of individuals] + [ENTER] \n")
+amount = input("How many individuals should the swarm contain? input [amount of individuals] + [ENTER] \n")
 
 ## create swarm
 swarm = Swarm(amount_of_individuals=int(amount))
